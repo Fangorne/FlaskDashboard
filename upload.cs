@@ -1,3 +1,5 @@
+
+
 public async Task UploadFileManualAsync()
 {
     string accessKey = "TA_CLEF_ACCES";
@@ -76,3 +78,28 @@ string ToHex(byte[] data)
 {
     return BitConverter.ToString(data).Replace("-", "").ToLower();
 }
+
+
+var md5Hash = MD5.HashData(fileBytes);
+string contentMD5 = Convert.ToBase64String(md5Hash);
+
+string canonicalHeaders =
+    $"content-md5:{contentMD5}\n" +
+    $"host:{host}\n" +
+    $"x-amz-content-sha256:{contentSha256}\n" +
+    $"x-amz-date:{amzDate}\n";
+
+string signedHeaders = "content-md5;host;x-amz-content-sha256;x-amz-date";
+
+
+string canonicalRequest =
+    $"PUT\n/{objectKey}\n\n" +
+    canonicalHeaders + "\n" +
+    signedHeaders + "\n" +
+    contentSha256;
+
+string authorizationHeader =
+    $"AWS4-HMAC-SHA256 Credential={accessKey}/{credentialScope}, " +
+    $"SignedHeaders={signedHeaders}, Signature={signature}";
+
+request.Headers.Add("Content-MD5", contentMD5);
