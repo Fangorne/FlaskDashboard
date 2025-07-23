@@ -103,3 +103,33 @@ string authorizationHeader =
     $"SignedHeaders={signedHeaders}, Signature={signature}";
 
 request.Headers.Add("Content-MD5", contentMD5);
+
+
+
+
+SELECT 
+    r.session_id,
+    r.status,
+    r.start_time,
+    r.command,
+    r.cpu_time,
+    r.total_elapsed_time / 1000 AS ElapsedSeconds,
+    r.wait_type,
+    DB_NAME(r.database_id) AS DatabaseName,
+    OBJECT_NAME(st.objectid, r.database_id) AS ProcedureName,
+    SUBSTRING(st.text, r.statement_start_offset / 2 + 1, 
+              (CASE r.statement_end_offset 
+               WHEN -1 THEN DATALENGTH(st.text)
+               ELSE r.statement_end_offset END 
+               - r.statement_start_offset) / 2 + 1) AS RunningStatement,
+    st.text AS FullBatch
+FROM 
+    sys.dm_exec_requests r
+JOIN 
+    sys.dm_exec_sessions s ON r.session_id = s.session_id
+CROSS APPLY 
+    sys.dm_exec_sql_text(r.sql_handle) st
+WHERE 
+    s.is_user_process = 1
+ORDER BY 
+    r.total_elapsed_time DESC;
