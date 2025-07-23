@@ -133,3 +133,14 @@ WHERE
     s.is_user_process = 1
 ORDER BY 
     r.total_elapsed_time DESC;
+
+
+SELECT 
+    r.session_id,
+    qp.query_plan
+FROM 
+    sys.dm_exec_requests r
+CROSS APPLY 
+    sys.dm_exec_query_plan(r.plan_handle) qp
+WHERE 
+    r.session_id = <ID_session_à_cibler>
