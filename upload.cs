@@ -1,4 +1,52 @@
 
+using Microsoft.Extensions.Logging;
+using Xunit;
+using Xunit.Abstractions;
+
+public class LoggerAdapter<T> : ILogger<T>, IDisposable
+{
+    private readonly ITestOutputHelper _output;
+
+    public LoggerAdapter(ITestOutputHelper output)
+    {
+        _output = output;
+    }
+
+    public IDisposable BeginScope<TState>(TState state) => this;
+
+    public void Dispose() { }
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(
+        LogLevel logLevel,
+        EventId eventId,
+        TState state,
+        Exception exception,
+        Func<TState, Exception, string> formatter)
+    {
+        _output.WriteLine($"{logLevel}: {formatter(state, exception)}");
+    }
+}
+
+public class DemoTests
+{
+    private readonly ILogger<DemoTests> _logger;
+
+    public DemoTests(ITestOutputHelper output)
+    {
+        _logger = new LoggerAdapter<DemoTests>(output);
+    }
+
+    [Fact]
+    public void Test1()
+    {
+        _logger.LogInformation("Début du test {Test}", nameof(Test1));
+        Assert.True(1 + 1 == 2);
+        _logger.LogInformation("Fin du test {Test}", nameof(Test1));
+    }
+}
+
 
 public async Task UploadFileManualAsync()
 {
