@@ -60,3 +60,56 @@ while ((read = await fs.ReadAsync(buffer, 0, buffer.Length)) > 0)
 
     sequence = new Sequence<byte>(sequence.AsReadOnlySequence.Slice(reader.Consumed));
 }
+
+
+public async IAsyncEnumerable<T> ReadStreamingAsync<T>(string path, int bufferSize = 8192, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+{
+    await using var fs = File.OpenRead(path);
+
+    var buffer = new byte[bufferSize];
+    var leftover = new MemoryStream();
+
+    int read;
+
+    while ((read = await fs.ReadAsync(buffer, 0, buffer.Length, ct)) > 0)
+    {
+        leftover.Write(buffer, 0, read);
+
+        var seq = new ReadOnlySequence<byte>(leftover.GetBuffer(), 0, (int)leftover.Length);
+
+        // ✅ MessagePackReader hors async / hors iterator
+        var items = DeserializeMany<T>(seq, out var consumed);
+
+        foreach (var item in items)
+            yield return item;
+
+        // garder le reste
+        var remaining = leftover.Length - consumed;
+        if (remaining > 0)
+            Array.Copy(leftover.GetBuffer(), consumed, leftover.GetBuffer(), 0, remaining);
+
+        leftover.SetLength(remaining);
+    }
+}
+
+private static IEnumerable<T> DeserializeMany<T>(ReadOnlySequence<byte> seq, out long consumed)
+{
+    var reader = new MessagePackReader(seq);
+    var result = new List<T>();
+    consumed = 0;
+
+    while (!reader.End)
+    {
+        try
+        {
+            result.Add(MessagePackSerializer.Deserialize<T>(ref reader));
+            consumed = reader.Consumed;
+        }
+        catch
+        {
+            break;
+        }
+    }
+
+    return result;
+}
