@@ -113,3 +113,45 @@ private static IEnumerable<T> DeserializeMany<T>(ReadOnlySequence<byte> seq, out
 
     return result;
 }
+
+
+public IEnumerable<T> ReadStreaming<T>(string path, int bufferSize = 8192)
+{
+    using var fs = File.OpenRead(path);
+
+    var buffer = new byte[bufferSize];
+    var leftover = new MemoryStream();
+
+    int read;
+
+    while ((read = fs.Read(buffer, 0, buffer.Length)) > 0)
+    {
+        leftover.Write(buffer, 0, read);
+
+        var seq = new ReadOnlySequence<byte>(leftover.GetBuffer(), 0, (int)leftover.Length);
+        var reader = new MessagePackReader(seq);
+
+        long consumed = 0;
+
+        while (!reader.End)
+        {
+            try
+            {
+                var item = MessagePackSerializer.Deserialize<T>(ref reader);
+                consumed = reader.Consumed;
+                yield return item;
+            }
+            catch
+            {
+                break; // message incomplet → lire plus de données
+            }
+        }
+
+        // garder la partie non consommée
+        var remaining = leftover.Length - consumed;
+        if (remaining > 0)
+            Array.Copy(leftover.GetBuffer(), consumed, leftover.GetBuffer(), 0, remaining);
+
+        leftover.SetLength(remaining);
+    }
+}
