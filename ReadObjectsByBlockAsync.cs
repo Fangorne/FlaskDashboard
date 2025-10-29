@@ -30,3 +30,33 @@ public async IAsyncEnumerable<T> ReadObjectsByBlockAsync<T>(
     foreach (var item in batch)
         yield return item;
 }
+
+using var fs = File.OpenRead("data.msgpack");
+var seq = new ReadOnlySequence<byte>(File.ReadAllBytes("data.msgpack"));
+var reader = new MessagePackReader(seq);
+int count = reader.ReadArrayHeader();
+
+for (int i = 0; i < count; i++)
+{
+    var obj = MessagePackSerializer.Deserialize<MyType>(ref reader);
+    // Traiter obj ici
+}
+
+
+using var fs = File.OpenRead(path);
+var buffer = new byte[8192];
+int read;
+var sequence = new Sequence<byte>();
+
+while ((read = await fs.ReadAsync(buffer, 0, buffer.Length)) > 0)
+{
+    sequence.Write(buffer.AsMemory(0, read));
+    var reader = new MessagePackReader(sequence.AsReadOnlySequence);
+
+    while (TryReadOne(ref reader, out MyType obj))
+    {
+        yield return obj;
+    }
+
+    sequence = new Sequence<byte>(sequence.AsReadOnlySequence.Slice(reader.Consumed));
+}
