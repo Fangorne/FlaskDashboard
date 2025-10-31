@@ -155,3 +155,41 @@ public IEnumerable<T> ReadStreaming<T>(string path, int bufferSize = 8192)
         leftover.SetLength(remaining);
     }
 }
+
+public static List<List<int>> BuildBuckets(List<string> values, int bucketCount)
+{
+    // Convertir en int et trier
+    var ints = values
+        .Select(v => int.TryParse(v, out var x) ? x : (int?)null)
+        .Where(v => v.HasValue)
+        .Select(v => v.Value)
+        .OrderBy(x => x)
+        .ToList();
+
+    if (ints.Count == 0 || bucketCount <= 0)
+        return new List<List<int>>();
+
+    int size = (int)Math.Ceiling(ints.Count / (double)bucketCount);
+
+    var buckets = new List<List<int>>();
+    for (int i = 0; i < ints.Count; i += size)
+        buckets.Add(ints.GetRange(i, Math.Min(size, ints.Count - i)));
+
+    return buckets;
+}
+
+public static int FindBucket(List<List<int>> buckets, string value)
+{
+    if (!int.TryParse(value, out int target))
+        return -1;
+
+    for (int i = 0; i < buckets.Count; i++)
+    {
+        // le bucket est trié, donc on regarde le dernier élément
+        if (target <= buckets[i][buckets[i].Count - 1])
+            return i;
+    }
+
+    // Si plus grand que tout → dernier bucket
+    return buckets.Count - 1;
+}
