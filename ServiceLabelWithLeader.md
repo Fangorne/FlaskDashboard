@@ -150,32 +150,40 @@ spec:
                   fieldPath: metadata.namespace
 ```
 ```yaml
+# rbac-leader.yaml
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: my-app-sa
+  namespace: default
 ---
-
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: my-app-role
+  namespace: default
 rules:
+  # Permet patch/get sur le Pod (pour ajouter/enlever label role=active)
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get", "patch"]
----
+    verbs: ["get", "patch", "update", "list"]
 
+  # Permet d'utiliser/mettre à jour les Leases pour la leader election
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: my-app-rb
+  namespace: default
 subjects:
   - kind: ServiceAccount
     name: my-app-sa
+    namespace: default
 roleRef:
   kind: Role
   name: my-app-role
   apiGroup: rbac.authorization.k8s.io
-
 ```
