@@ -84,7 +84,7 @@ app.MapGet("/who", () => Environment.GetEnvironmentVariable("POD_NAME"));
 
 app.Run();
 
-
+```yaml
 env:
   - name: POD_NAME
     valueFrom:
@@ -95,8 +95,9 @@ env:
     valueFrom:
       fieldRef:
         fieldPath: metadata.namespace
+```
 
-
+```yaml
 apiVersion: v1
 kind: Service
 metadata:
@@ -109,8 +110,9 @@ spec:
     - name: http
       port: 80
       targetPort: 80
+```
 
-
+```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -146,7 +148,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-
+```
+```yaml
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -175,4 +178,4 @@ roleRef:
   name: my-app-role
   apiGroup: rbac.authorization.k8s.io
 
-
+```
