@@ -102,3 +102,42 @@ def bulk_delete_in_chunks(
 
         session.execute(stmt)
         session.commit()  # commit par batch, plus safe
+
+
+
+def bulk_delete_composite(
+    session: Session,
+    model: Type,
+    keys: Iterable[Tuple],
+    column_names: Iterable[str],
+    chunk_size: int = 1000,
+):
+    """
+    Suppression en masse de lignes SQL Server avec clé composite.
+    
+    Parameters:
+        session : SQLAlchemy session
+        model : ORM model class
+        keys : iterable de tuples représentant la clé composite
+        column_names : noms des colonnes de la clé composite dans le même ordre
+        chunk_size : taille d'un batch SQL (défaut 1000)
+    """
+    keys_iter = iter(keys)
+
+    while True:
+        chunk = list([k for _, k in zip(range(chunk_size), keys_iter)])
+        if not chunk:
+            break
+
+        # Construction dynamique de la clause WHERE
+        conditions = [
+            and_(*[
+                getattr(model, col) == key[i]
+                for i, col in enumerate(column_names)
+            ])
+            for key in chunk
+        ]
+
+        stmt = delete(model).where(or_(*conditions))
+        session.execute(stmt)
+        session.commit()
