@@ -68,3 +68,37 @@ def bulk_delete_by_ids(session: Session, ModelClass, composite_keys: list[tuple]
 
     session.commit()
     return deleted_count
+
+
+from sqlalchemy.orm import Session
+from sqlalchemy import delete
+from typing import Iterable, Type
+
+def bulk_delete_in_chunks(
+    session: Session,
+    model: Type,
+    ids: Iterable[int],
+    chunk_size: int = 1000
+):
+    """
+    Supprime en masse des lignes SQL Server en batchs.
+    Ne charge pas les objets en mémoire.
+
+    Parameters
+    ----------
+    session : SQLAlchemy session
+    model   : ORM model (class)
+    ids     : iterable of primary keys
+    chunk_size : batch size (default 1000 for SQL Server)
+    """
+    ids_iter = iter(ids)
+
+    while True:
+        chunk = list([x for _, x in zip(range(chunk_size), ids_iter)])
+        if not chunk:
+            break
+
+        stmt = delete(model).where(model.id.in_(chunk))
+
+        session.execute(stmt)
+        session.commit()  # commit par batch, plus safe
