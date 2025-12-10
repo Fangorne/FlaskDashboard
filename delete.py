@@ -141,3 +141,41 @@ def bulk_delete_composite(
         stmt = delete(model).where(or_(*conditions))
         session.execute(stmt)
         session.commit()
+
+
+def bulk_delete_composite(
+    session: Session,
+    model: Type,
+    keys: Iterable[Tuple],
+    column_names: Iterable[str],
+    chunk_size: int = 1000,
+):
+    """
+    Supprime en masse des lignes avec clé composite sur SQL Server 2016+.
+    
+    Parameters
+    ----------
+    session : SQLAlchemy session
+    model : ORM model
+    keys : iterable de tuples représentant les clés composites
+    column_names : noms des colonnes dans le modèle (ordre identique aux tuples)
+    chunk_size : nombre de tuples par batch
+    """
+    # Convertir column_names en colonnes SQLAlchemy
+    model_cols = [getattr(model, col) for col in column_names]
+
+    # Transformer keys en liste (au cas où c'est un générateur)
+    keys_list = [k for k in keys if all(v is not None for v in k)]
+
+    # Chunking
+    for i in range(0, len(keys_list), chunk_size):
+        batch = keys_list[i:i + chunk_size]
+        if not batch:
+            continue
+
+        # DELETE avec tuple_.in_() pour clé composite
+        stmt = delete(model).where(tuple_(*model_cols).in_(batch))
+        result = session.execute(stmt)
+        session.commit()
+
+        print(f"Batch {i//chunk_size + 1}: {result.rowcount} lignes supprimées")
