@@ -32,7 +32,7 @@ socle-kafka-python/
 │ │
 │ ├── api/
 │ │ ├── main.py
-│ │ ├── routes/
+│ │── routes/
 │ │ └── dependencies.py
 │ │
 │ └── config/
@@ -51,4 +51,4 @@ socle-kafka-python/
 ├── requirements.txt
 ├── pyproject.toml
 ├── README.md
-└── .gitignore
+└── .gitignore ├
