@@ -6,6 +6,14 @@ def join_with_db_batch(
     transform: Optional[Callable[[Dict], Dict]] = None,
     return_rejected: bool = False,
 ):
+def join_with_db_batch(
+    session: Session,
+    records: List[Dict],
+    lookup_sql: str,
+    param_cols: Optional[List[str]] = None,
+    transform: Optional[Callable[[Dict], Dict]] = None,
+    return_rejected: bool = False,
+):
     if not records:
         return []
 
@@ -13,18 +21,17 @@ def join_with_db_batch(
     param_values = [tuple(record[k] for k in param_cols) for record in records]
     unique_params = list(set(param_values))
 
-    # Construction de la condition IN pour chaque champ
-    in_conditions = []
-    for k in param_cols:
-        placeholders = ", ".join([f":{k}_{i}" for i in range(len(unique_params))])
-        in_conditions.append(f"{k} IN ({placeholders})")
+    # Construction de la condition (col1, col2) IN ((val1, val2), (val3, val4), ...)
+    placeholders = ", ".join(
+        [f"({', '.join([f':{k}_{i}' for k in param_cols])})" for i in range(len(unique_params))]
+    )
+    in_condition = f"({', '.join(param_cols)}) IN ({placeholders})"
 
-    # Ajout de la condition avec AND
-    where_clause = " AND ".join(in_conditions)
+    # Ajout de la condition avec AND si WHERE existe déjà
     if "WHERE" in lookup_sql.upper():
-        batch_sql = f"{lookup_sql} AND {where_clause}"
+        batch_sql = f"{lookup_sql} AND {in_condition}"
     else:
-        batch_sql = f"{lookup_sql} WHERE {where_clause}"
+        batch_sql = f"{lookup_sql} WHERE {in_condition}"
 
     # Préparation des paramètres
     params = {}
