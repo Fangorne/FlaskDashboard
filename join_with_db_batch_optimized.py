@@ -9,19 +9,28 @@ def join_with_db_batch_optimized(
     if not records:
         return []
 
-    param_cols = param_cols or records[0].keys()
+    # Si param_cols n'est pas précisé, on utilise toutes les clés du premier record
+    param_cols = param_cols or list(records[0].keys())
+
+    # On extrait les valeurs uniques des paramètres pour la requête batch
     param_values = [tuple(record[k] for k in param_cols) for record in records]
     unique_params = list(set(param_values))
 
     # Construction de la requête batch
-    placeholders = ", ".join([f"({', '.join([':' + k + str(i) for k in param_cols])})" for i in range(len(unique_params))])
-    batch_sql = lookup_sql.replace("WHERE user_id = :user_id", f"WHERE ({', '.join(param_cols)}) IN ({placeholders})", 1)
+    # Exemple: WHERE (col1, col2) IN ((val1, val2), (val3, val4), ...)
+    placeholders = ", ".join(
+        [f"({', '.join([f':{k}_{i}' for k in param_cols])})" for i in range(len(unique_params))]
+    )
+    where_clause = f"WHERE ({', '.join(param_cols)}) IN ({placeholders})"
+
+    # On remplace le WHERE de la requête d'origine
+    batch_sql = lookup_sql.split("WHERE")[0] + where_clause
 
     # Préparation des paramètres
     params = {}
     for i, p in enumerate(unique_params):
         for j, k in enumerate(param_cols):
-            params[f"{k}{i}"] = p[j]
+            params[f"{k}_{i}"] = p[j]
 
     # Exécution de la requête batch
     results = session.execute(batch_sql, params).fetchall()
@@ -46,15 +55,3 @@ def join_with_db_batch_optimized(
     if return_rejected:
         return joined, rejected
     return joined
-
-# Appel de la fonction optimisée
-joined_users, rejected_users = join_with_db_batch_optimized(
-    session=session,
-    records=users,
-    lookup_sql="SELECT * FROM user_profiles WHERE user_id = :user_id",
-    param_cols=["user_id"],
-    return_rejected=True
-)
-
-print("Utilisateurs joints :", joined_users)
-print("Utilisateurs non trouvés :", rejected_users)
