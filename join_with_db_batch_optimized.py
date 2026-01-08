@@ -1,4 +1,4 @@
-def join_with_db_batch_optimized(
+def join_with_db_batch(
     session: Session,
     records: List[Dict],
     lookup_sql: str,
@@ -9,22 +9,22 @@ def join_with_db_batch_optimized(
     if not records:
         return []
 
-    # Si param_cols n'est pas précisé, on utilise toutes les clés du premier record
     param_cols = param_cols or list(records[0].keys())
-
-    # On extrait les valeurs uniques des paramètres pour la requête batch
     param_values = [tuple(record[k] for k in param_cols) for record in records]
     unique_params = list(set(param_values))
 
-    # Construction de la requête batch
-    # Exemple: WHERE (col1, col2) IN ((val1, val2), (val3, val4), ...)
-    placeholders = ", ".join(
-        [f"({', '.join([f':{k}_{i}' for k in param_cols])})" for i in range(len(unique_params))]
-    )
-    where_clause = f"WHERE ({', '.join(param_cols)}) IN ({placeholders})"
+    # Construction de la condition IN pour chaque champ
+    in_conditions = []
+    for k in param_cols:
+        placeholders = ", ".join([f":{k}_{i}" for i in range(len(unique_params))])
+        in_conditions.append(f"{k} IN ({placeholders})")
 
-    # On remplace le WHERE de la requête d'origine
-    batch_sql = lookup_sql.split("WHERE")[0] + where_clause
+    # Ajout de la condition avec AND
+    where_clause = " AND ".join(in_conditions)
+    if "WHERE" in lookup_sql.upper():
+        batch_sql = f"{lookup_sql} AND {where_clause}"
+    else:
+        batch_sql = f"{lookup_sql} WHERE {where_clause}"
 
     # Préparation des paramètres
     params = {}
