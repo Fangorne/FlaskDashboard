@@ -1,19 +1,3 @@
-def join_with_db_batch(
-    session: Session,
-    records: List[Dict],
-    lookup_sql: str,
-    param_cols: Optional[List[str]] = None,
-    transform: Optional[Callable[[Dict], Dict]] = None,
-    return_rejected: bool = False,
-):
-def join_with_db_batch(
-    session: Session,
-    records: List[Dict],
-    lookup_sql: str,
-    param_cols: Optional[List[str]] = None,
-    transform: Optional[Callable[[Dict], Dict]] = None,
-    return_rejected: bool = False,
-):
     if not records:
         return []
 
@@ -21,23 +5,22 @@ def join_with_db_batch(
     param_values = [tuple(record[k] for k in param_cols) for record in records]
     unique_params = list(set(param_values))
 
-    # Construction de la condition (col1, col2) IN ((val1, val2), (val3, val4), ...)
-    placeholders = ", ".join(
-        [f"({', '.join([f':{k}_{i}' for k in param_cols])})" for i in range(len(unique_params))]
-    )
-    in_condition = f"({', '.join(param_cols)}) IN ({placeholders})"
-
-    # Ajout de la condition avec AND si WHERE existe déjà
-    if "WHERE" in lookup_sql.upper():
-        batch_sql = f"{lookup_sql} AND {in_condition}"
-    else:
-        batch_sql = f"{lookup_sql} WHERE {in_condition}"
-
-    # Préparation des paramètres
+    # Construction de la sous-requête VALUES
+    values_clauses = []
     params = {}
     for i, p in enumerate(unique_params):
+        values_clauses.append(f"({', '.join([f':{k}_{i}' for k in param_cols])})")
         for j, k in enumerate(param_cols):
             params[f"{k}_{i}"] = p[j]
+
+    values_str = ", ".join(values_clauses)
+    temp_table = f"SELECT * FROM (VALUES {values_str}) AS TempTable({', '.join(param_cols)})"
+
+    # Construction de la requête avec INNER JOIN
+    if "WHERE" in lookup_sql.upper():
+        batch_sql = f"{lookup_sql} AND ({', '.join(param_cols)}) IN (SELECT {', '.join(param_cols)} FROM ({temp_table}) AS T)"
+    else:
+        batch_sql = f"{lookup_sql} WHERE ({', '.join(param_cols)}) IN (SELECT {', '.join(param_cols)} FROM ({temp_table}) AS T)"
 
     # Exécution de la requête batch
     results = session.execute(batch_sql, params).fetchall()
