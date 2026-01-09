@@ -1,127 +1,45 @@
-def bulk_delete_by_ids(session: Session, ModelClass, composite_keys: list[tuple], pk_column_names: list[str] = None):
-    """
-    Supprime en masse des enregistrements identifiés par une liste de clés composites.
-
-    Ceci exécute une seule requête DELETE utilisant la comparaison de tuples SQL:
-    DELETE FROM <table> WHERE (pk1, pk2, ...) IN ((val1_1, val1_2, ...), (val2_1, val2_2, ...))
-
-    :param session: La session SQLAlchemy active.
-    :param ModelClass: La classe du modèle (ex: ItemStock) dont les objets doivent être supprimés.
-    :param composite_keys: Une liste de tuples, chaque tuple représentant une clé composite complète à supprimer.
-                           Ex: [(1, 101), (2, 102), ...]
-    :param pk_column_names: (OPTIONNEL) Une liste des noms de colonnes de la clé primaire 
-                            dans l'ordre où elles apparaissent dans `composite_keys`.
-                            Ex: ['item_id', 'location_id']. Si None, utilise l'ordre par défaut du mapper.
-    :return: Le nombre de lignes supprimées.
-    """
-    if not composite_keys:
-        print("La liste de clés composites est vide. Aucune suppression effectuée.")
-        return 0
-
-    mapper = class_mapper(ModelClass)
-    
-    # 1. Détermination et validation des colonnes PK
-    
-    # Si les noms de colonnes sont fournis, utilisez-les pour construire le tuple de colonnes SQLAlchemy
-    if pk_column_names:
-        if len(pk_column_names) != len(mapper.primary_key):
-            print(f"Erreur: Le nombre de colonnes PK fournies ({len(pk_column_names)}) ne correspond pas au nombre de clés primaires dans le modèle ({len(mapper.primary_key)}).")
-            return 0
-        
-        try:
-            # Créer un tuple des objets Colonne dans l'ordre spécifié
-            pk_tuple = tuple(getattr(ModelClass, name) for name in pk_column_names)
-        except AttributeError as e:
-            print(f"Erreur: Colonne spécifiée introuvable dans le modèle: {e}")
-            return 0
-            
-    # Sinon, utilisez l'ordre par défaut du mapper
-    else:
-        # Récupérer les colonnes de la clé primaire de manière dynamique
-        pk_columns = [c for c in mapper.primary_key]
-        if len(pk_columns) == 0:
-            print(f"Le modèle {ModelClass.__name__} n'a pas de clé primaire définie.")
-            return 0
-        pk_tuple = tuple(pk_columns)
-
-    # 2. Validation de la taille des tuples de données
-    expected_pk_len = len(pk_tuple)
-    if composite_keys and len(composite_keys[0]) != expected_pk_len:
-        print(f"Erreur: Les tuples de clés composites doivent contenir {expected_pk_len} éléments (basé sur les colonnes PK déterminées).")
-        return 0
-
-    # 3. Construction de la condition de suppression (Tuple Comparison)
-    # Ex: (ItemStock.item_id, ItemStock.location_id).in_([(1, 101), (2, 102), ...])
-    filter_condition = pk_tuple.in_(composite_keys)
-
-    # 4. Construction de l'instruction DELETE
-    stmt = (
-        delete(ModelClass)
-        .where(filter_condition)
-    )
-    
-    # 5. Exécution de l'instruction
-    result = session.execute(stmt)
-    
-    deleted_count = result.rowcount
-    print(f"{deleted_count} enregistrements du modèle {ModelClass.__name__} supprimés en masse.")
-
-    session.commit()
-    return deleted_count
-
-
+from typing import List, Dict, Iterable, Tuple, Type, Optional, Callable
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
-from sqlalchemy import delete
-from typing import Iterable, Type
 
-def bulk_delete_in_chunks(
+
+def bulk_lookup_composite(
     session: Session,
     model: Type,
-    ids: Iterable[int],
-    chunk_size: int = 1000
-):
-    """
-    Supprime en masse des lignes SQL Server en batchs.
-    Ne charge pas les objets en mémoire.
-
-    Parameters
-    ----------
-    session : SQLAlchemy session
-    model   : ORM model (class)
-    ids     : iterable of primary keys
-    chunk_size : batch size (default 1000 for SQL Server)
-    """
-    ids_iter = iter(ids)
-
-    while True:
-        chunk = list([x for _, x in zip(range(chunk_size), ids_iter)])
-        if not chunk:
-            break
-
-        stmt = delete(model).where(model.id.in_(chunk))
-
-        session.execute(stmt)
-        session.commit()  # commit par batch, plus safe
-
-
-
-def bulk_delete_composite(
-    session: Session,
-    model: Type,
-    keys: Iterable[Tuple],
+    records: List[Dict],
     column_names: Iterable[str],
     chunk_size: int = 1000,
-):
+    transform: Optional[Callable[[Dict], Dict]] = None,
+    return_rejected: bool = False,
+) -> List[Dict] | tuple[List[Dict], List[Dict]]:
     """
-    Suppression en masse de lignes SQL Server avec clé composite.
-    
-    Parameters:
-        session : SQLAlchemy session
-        model : ORM model class
-        keys : iterable de tuples représentant la clé composite
-        column_names : noms des colonnes de la clé composite dans le même ordre
-        chunk_size : taille d'un batch SQL (défaut 1000)
+    Lookup batché SQL Server avec clé composite (pattern bulk_delete_composite).
+
+    - Pas de ligne à ligne
+    - Une requête SQL par chunk
+    - Compatible SQL Server 2016
+
+    :param session: session SQLAlchemy
+    :param model: modèle ORM à joindre
+    :param records: données en mémoire
+    :param column_names: colonnes de jointure (clé composite)
+    :param chunk_size: taille des batchs
+    :param transform: transformation optionnelle
+    :param return_rejected: retourne les non-matchés
     """
+
+    col_names = list(column_names)
+
+    accepted: List[Dict] = []
+    rejected: List[Dict] = []
+
+    # index mémoire pour rattacher les résultats
+    index = {
+        tuple(record[col] for col in col_names): record
+        for record in records
+    }
+
+    keys = list(index.keys())
     keys_iter = iter(keys)
 
     while True:
@@ -129,53 +47,41 @@ def bulk_delete_composite(
         if not chunk:
             break
 
-        # Construction dynamique de la clause WHERE
+        # WHERE (c1=v1 AND c2=v2) OR ...
         conditions = [
             and_(*[
                 getattr(model, col) == key[i]
-                for i, col in enumerate(column_names)
+                for i, col in enumerate(col_names)
             ])
             for key in chunk
         ]
 
-        stmt = delete(model).where(or_(*conditions))
-        session.execute(stmt)
-        session.commit()
+        stmt = select(model).where(or_(*conditions))
+        rows = session.execute(stmt).scalars().all()
 
+        matched_keys = set()
 
-def bulk_delete_composite(
-    session: Session,
-    model: Type,
-    keys: Iterable[Tuple],
-    column_names: Iterable[str],
-    chunk_size: int = 1000,
-):
-    """
-    Supprime en masse des lignes avec clé composite sur SQL Server 2016+.
-    
-    Parameters
-    ----------
-    session : SQLAlchemy session
-    model : ORM model
-    keys : iterable de tuples représentant les clés composites
-    column_names : noms des colonnes dans le modèle (ordre identique aux tuples)
-    chunk_size : nombre de tuples par batch
-    """
-    # Convertir column_names en colonnes SQLAlchemy
-    model_cols = [getattr(model, col) for col in column_names]
+        for row in rows:
+            key = tuple(getattr(row, col) for col in col_names)
+            matched_keys.add(key)
 
-    # Transformer keys en liste (au cas où c'est un générateur)
-    keys_list = [k for k in keys if all(v is not None for v in k)]
+            joined = {
+                **index[key],
+                **row.__dict__,
+            }
+            joined.pop("_sa_instance_state", None)
 
-    # Chunking
-    for i in range(0, len(keys_list), chunk_size):
-        batch = keys_list[i:i + chunk_size]
-        if not batch:
-            continue
+            if transform:
+                joined = transform(joined)
 
-        # DELETE avec tuple_.in_() pour clé composite
-        stmt = delete(model).where(tuple_(*model_cols).in_(batch))
-        result = session.execute(stmt)
-        session.commit()
+            accepted.append(joined)
 
-        print(f"Batch {i//chunk_size + 1}: {result.rowcount} lignes supprimées")
+        if return_rejected:
+            for key in chunk:
+                if key not in matched_keys:
+                    rejected.append(index[key])
+
+    if return_rejected:
+        return accepted, rejected
+
+    return accepted
