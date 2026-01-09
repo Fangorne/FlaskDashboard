@@ -44,3 +44,17 @@ def bulk_lookup_aggregated_sql(
         joined.pop("__row_id")
 
         result[rid].update(joined)
+
+        if transform:
+            result[rid] = transform(result[rid])
+
+    if not return_rejected:
+        return result
+
+    rejected = [
+        records[i]
+        for i in range(len(records))
+        if i not in matched
+    ]
+
+    return result, rejected
