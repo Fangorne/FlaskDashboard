@@ -1,47 +1,72 @@
-from typing import List, Dict, Optional, Callable
-from sqlalchemy.orm import Session
-import pandas as pd
 
-def join_with_db_batch_sqlserver(
+def bulk_lookup_sql(
     session: Session,
     records: List[Dict],
     lookup_sql: str,
-    param_cols: Optional[List[str]] = None,
+    param_cols: List[str],
+    chunk_size: int = 1000,
     transform: Optional[Callable[[Dict], Dict]] = None,
     return_rejected: bool = False,
-):
+) -> List[Dict] | Tuple[List[Dict], List[Dict]]:
+
     if not records:
-        return []
+        return ([], []) if return_rejected else []
 
-    param_cols = param_cols or list(records[0].keys())
+    accepted: List[Dict] = []
+    rejected: List[Dict] = []
 
-    # 1. Exécuter la requête SQL sans filtre pour récupérer tous les résultats
-    all_results = session.execute(lookup_sql).fetchall()
+    keys_iter = iter(records)
 
-    # 2. Convertir les résultats en DataFrame pour un lookup efficace
-    df_results = pd.DataFrame([dict(r._asdict()) for r in all_results])
+    while True:
+        chunk = list([r for _, r in zip(range(chunk_size), keys_iter)])
+        if not chunk:
+            break
 
-    # 3. Préparer les records en DataFrame
-    df_records = pd.DataFrame(records)
+        # (c1 = :c1_0 AND c2 = :c2_0) OR ...
+        where_clauses = []
+        params = {}
 
-    # 4. Effectuer le merge (lookup) sur les colonnes param_cols
-    df_merged = pd.merge(
-        df_records,
-        df_results,
-        on=param_cols,
-        how="left"
-    )
+        for idx, record in enumerate(chunk):
+            ands = []
+            for col in param_cols:
+                pname = f"{col}_{idx}"
+                ands.append(f"{col} = :{pname}")
+                params[pname] = record[col]
+            where_clauses.append(f"({' AND '.join(ands)})")
 
-    # 5. Convertir le résultat en liste de dictionnaires
-    joined = df_merged.where(pd.notnull(df_merged), None).to_dict("records")
+        where_sql = " OR ".join(where_clauses)
 
-    # 6. Appliquer la transformation si nécessaire
-    if transform:
-        joined = [transform(r) for r in joined if any(v is not None for v in r.values())]
+        # injection SAFE du WHERE (lookup_sql reste intact)
+        sql = f"""
+        SELECT *
+        FROM (
+            {lookup_sql}
+        ) AS _lookup
+        WHERE {where_sql}
+        """
 
-    # 7. Filtrer les records non trouvés
-    rejected = [r for r in records if not df_merged[df_merged[param_cols] == r].any().any()]
+        rows = session.execute(text(sql), params).mappings().all()
+
+        matched = set()
+
+        for row in rows:
+            key = tuple(row[col] for col in param_cols)
+            matched.add(key)
+
+            for record in chunk:
+                if tuple(record[col] for col in param_cols) == key:
+                    joined = {**record, **row}
+                    if transform:
+                        joined = transform(joined)
+                    accepted.append(joined)
+
+        if return_rejected:
+            for record in chunk:
+                key = tuple(record[col] for col in param_cols)
+                if key not in matched:
+                    rejected.append(record)
 
     if return_rejected:
-        return joined, rejected
-    return joined
+        return accepted, rejected
+
+    return accepted
