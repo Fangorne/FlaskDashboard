@@ -1,41 +1,52 @@
-def bulk_delete_sql(
+def bulk_delete_sql_composite(
     session: Session,
     records: List[Dict],
     table_name: str,
-    field_name: str,
+    cols_param: List[str],
 ):
     """
-    DELETE batché SQL Server (pattern table temporaire).
+    DELETE batché SQL Server 2016 avec clé composite.
     """
 
     if not records:
         return
 
-    # 1️⃣ table temporaire
+    # 1️⃣ CREATE TABLE #input
+    cols_def = []
+    for col in cols_param:
+        if col.lower().endswith("date"):
+            cols_def.append(f"{col} DATE")
+        else:
+            cols_def.append(f"{col} NVARCHAR(255)")
+
     session.execute(text(f"""
         CREATE TABLE #input (
-            field_value NVARCHAR(255) NOT NULL
+            {", ".join(cols_def)}
         )
     """))
 
-    # 2️⃣ bulk insert
-    insert_sql = text("""
-        INSERT INTO #input (field_value)
-        VALUES (:field_value)
+    # 2️⃣ INSERT BULK
+    insert_sql = text(f"""
+        INSERT INTO #input ({", ".join(cols_param)})
+        VALUES ({", ".join(f":{c}" for c in cols_param)})
     """)
 
     payload = [
-        {"field_value": r[field_name]}
+        {c: r[c] for c in cols_param}
         for r in records
     ]
 
     session.execute(insert_sql, payload)
 
-    # 3️⃣ delete batché
+    # 3️⃣ DELETE JOIN
+    join_cond = " AND ".join(
+        f"t.{c} = i.{c}" for c in cols_param
+    )
+
     session.execute(text(f"""
         DELETE t
         FROM {table_name} t
-        JOIN #input i ON t.{field_name} = i.field_value
+        JOIN #input i ON {join_cond}
     """))
 
     session.commit()
