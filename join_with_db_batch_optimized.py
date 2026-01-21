@@ -88,6 +88,12 @@ def special_join_with_db_bulk(
     # -----------------------------
     # Création table temporaire
     # -----------------------------
+
+    session.execute(text("""
+    IF OBJECT_ID('tempdb..#input') IS NOT NULL
+        DROP TABLE #input
+    """))
+    
     cols_def = ", ".join(f"{c} NVARCHAR(255)" for c in param_cols)
 
     session.execute(text(f"""
